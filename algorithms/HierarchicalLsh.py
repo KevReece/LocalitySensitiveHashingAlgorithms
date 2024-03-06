@@ -12,8 +12,8 @@ class HierarchicalLsh:
         self.num_levels = num_levels
 
     def fit(self, data):
-        sample_ratio = 0.2
-        data_subset_size = int(data.shape[0] * sample_ratio)
+        MAXIMUM_SAMPLE_SIZE = 1_000
+        data_subset_size = min(data.shape[0], MAXIMUM_SAMPLE_SIZE)
         print(f"Using {data_subset_size} samples for hierarchical clustering")
         shuffled_data = np.random.permutation(data)
         data_subset = shuffled_data[:data_subset_size]
@@ -37,8 +37,6 @@ class HierarchicalClustering:
         # clusters' ordering is based on iterations of cluster merging, starting from leave pairs, and ending with the root cluster 
         # therefore the length of z is always n-1, where n is the number of leaves
         self.clusters = linkage(data, method=method)
-        self.maximum_hash_length = math.ceil(np.log2(len(data)))
-        print(f"Maximum HierarchicalClustering hash length: {self.maximum_hash_length}")
 
     def find_nearest_leaf(self, vector):
         root_cluster_id = self._get_root_cluster_id()

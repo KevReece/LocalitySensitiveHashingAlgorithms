@@ -47,11 +47,6 @@ class HierarchicalHyperplaneClustering:
         # therefore the length of z is always n-1, where n is the number of leaves
         print(f"Building hierarchy over {len(data)} data points")
         self.clusters = linkage(data, method='ward')
-        maximum_hash_length = math.ceil(np.log2(len(data)))
-        print(f"Maximum HierarchicalClustering hash length: {maximum_hash_length}")
-        if num_levels > maximum_hash_length:
-            num_levels = maximum_hash_length
-            print(f'Limiting num_levels to maximum: {maximum_hash_length}')
         self.num_levels = num_levels
         self._enrich_clusters()
         print('Hierarchical hyperplanes calculated')
@@ -67,7 +62,7 @@ class HierarchicalHyperplaneClustering:
         print(f"Enriching clusters with parents and levels and hyperplanes")
         self._traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(self._get_root_node_id())
 
-    def _traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(self, node_id, parent_id=None, level=1):
+    def _traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(self, node_id, parent_id=None, level=0):
         if self._is_leaf(node_id):
             return self._get_leaf(node_id), 0
         cluster = self._get_cluster(node_id)
@@ -89,7 +84,7 @@ class HierarchicalHyperplaneClustering:
         cluster_hyperplane_centre, cluster_hyperplane_direction = self.cluster_hyperplanes[int(node_id)]
 
         is_left = np.dot(vector - cluster_hyperplane_centre, cluster_hyperplane_direction) < 0
-        is_penultimate_level = cluster[ClusterValue.LEVEL] == self.num_levels-1
+        is_penultimate_level = int(cluster[ClusterValue.LEVEL]) == self.num_levels-1
 
         if is_penultimate_level:
             return self.BIT_AS_0 if is_left else self.BIT_AS_1
