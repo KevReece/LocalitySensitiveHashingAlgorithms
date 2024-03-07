@@ -69,17 +69,18 @@ class HierarchicalHyperplaneClustering:
 
     def _traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(self, node_id, parent_id=None, level=0):
         if self._is_leaf(node_id):
-            return self._get_leaf(node_id), 0
+            return self._get_leaf(node_id), 0, 1
         cluster = self._get_cluster(node_id)
         cluster[ClusterValue.PARENT] = parent_id
         cluster[ClusterValue.LEVEL] = level
-        left_mean, left_standard_deviation = self._traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(cluster[ClusterValue.LEFT], node_id, level+1)
-        right_mean, right_standard_deviation = self._traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(cluster[ClusterValue.RIGHT], node_id, level+1)
-        cluster_mean, cluster_standard_deviation = self._generalized_mean_std(left_mean, right_mean, left_standard_deviation, right_standard_deviation)
+        left_mean, left_standard_deviation, left_scale = self._traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(cluster[ClusterValue.LEFT], node_id, level+1)
+        right_mean, right_standard_deviation, right_scale = self._traverse_enriching_clusters_with_parents_and_levels_and_hyperplanes(cluster[ClusterValue.RIGHT], node_id, level+1)
+        cluster_mean, cluster_standard_deviation = self._merge_means_and_standard_deviations(left_mean, right_mean, left_standard_deviation, right_standard_deviation, left_scale, right_scale)
+        normal_distributions_intersection = self._calculate_normal_distributions_intersection(left_mean, right_mean, left_standard_deviation, right_standard_deviation, left_scale, right_scale)
         right_direction = right_mean - left_mean
         unit_right_direction = right_direction / np.linalg.norm(right_direction)
-        self.cluster_hyperplanes[int(node_id)] = (cluster_mean, unit_right_direction)
-        return cluster_mean, cluster_standard_deviation
+        self.cluster_hyperplanes[int(node_id)] = (normal_distributions_intersection, unit_right_direction)
+        return cluster_mean, cluster_standard_deviation, cluster[ClusterValue.TOTAL_LEAVES]
 
     def _traverse_down_nodes_for_hash(self, node_id, vector):
         if self._is_leaf(node_id): 
@@ -99,20 +100,52 @@ class HierarchicalHyperplaneClustering:
         
         return self.BIT_AS_1 + self._traverse_down_nodes_for_hash(cluster[ClusterValue.RIGHT], vector)
     
-    def _generalized_mean_std(self, mean1, mean2, standard_deviation1, standard_deviation2):
-        MIN_STANDARD_DEVIATION = 1e-6 # to avoid division by zero in the case of leaves
-        inverse_squared_standard_deviation1 = 1 / max(standard_deviation1, MIN_STANDARD_DEVIATION)**2
-        inverse_squared_standard_deviation2 = 1 / max(standard_deviation2, MIN_STANDARD_DEVIATION)**2
-        weights = np.array([inverse_squared_standard_deviation1, inverse_squared_standard_deviation2])
-        weights /= np.sum(weights)
+    def _merge_means_and_standard_deviations(self, mean1, mean2, standard_deviation1, standard_deviation2, scale1, scale2):
+        total_scale = scale1 + scale2
+        scale_weights = [scale1 / total_scale, scale2 / total_scale]
 
-        mean = np.average(np.vstack([mean1, mean2]), axis=0, weights=weights)
+        # merged mean = average of scaled means
+        mean = np.average(np.vstack([mean1, mean2]), axis=0, weights=scale_weights)
 
-        deviation1 = np.linalg.norm(mean1 - mean)
-        deviation2 = np.linalg.norm(mean2 - mean)
-        standard_deviation = (deviation1 + deviation2)/2
+        # merged standard deviation = 
+        #   scaled average means deviations when the means are far apart
+        #   or scaled average variances as standard deviation when means are identical
+        #   naively, we will linearly scale from an average standard deviation of 0 to 2.5
+        deviation_from_mean1 = np.linalg.norm(mean1 - mean)
+        deviation_from_mean2 = np.linalg.norm(mean2 - mean)
+        average_deviation_from_mean = np.average([deviation_from_mean1, deviation_from_mean2], weights=scale_weights)
+        pooled_variance = np.average([standard_deviation1**2, standard_deviation2**2], weights=scale_weights)
+        combined_standard_deviation = np.sqrt(pooled_variance)
+        mean_deviation_scaling_factor = min(average_deviation_from_mean, 2.5) / 2.5
+        standard_deviation = mean_deviation_scaling_factor * average_deviation_from_mean + (1 - mean_deviation_scaling_factor) * combined_standard_deviation
 
         return mean, standard_deviation
+
+    def _calculate_normal_distributions_intersection(self, mean1, mean2, standard_deviation1, standard_deviation2, scale1, scale2):
+        MIN_STANDARD_DEVIATION = 1e-6 # to avoid a hyperplane intersecting on the leaf, when intersecting a leaf distribution with a cluster
+        standard_deviation1 = max(standard_deviation1, MIN_STANDARD_DEVIATION)
+        standard_deviation2 = max(standard_deviation2, MIN_STANDARD_DEVIATION)
+        if standard_deviation1 == standard_deviation2:
+            return (mean1 + mean2) / 2
+        # consider only the 1 dimensional line connecting the means
+        mean1_1d = 0
+        mean2_1d = np.linalg.norm(mean2 - mean1)
+        # solve using quadratics along the 1d line
+        a = 1/(2*standard_deviation1**2) - 1/(2*standard_deviation2**2)
+        b = mean2_1d/(standard_deviation2**2) - mean1_1d/(standard_deviation1**2)
+        c = mean1_1d**2 /(2*standard_deviation1**2) - mean2_1d**2 / (2*standard_deviation2**2) - np.log((standard_deviation2*scale1)/(standard_deviation1*scale2))
+        roots = np.roots([a,b,c])
+        # choose the root that is between the means, if any
+        intersections_1d = roots[(mean1_1d < roots) & (roots < mean2_1d)]
+        if len(intersections_1d) == 0:
+            # edge case where one distribution is too close/tall/wide to intersect with the other (this does occur)
+            # in this case, we could pre-emptively reduce the standard deviations proportionately, but for simplicity we return the mean of the two distributions
+            print(f"Warning: distributions are too close/tall/wide to intersect")
+            return mean1 + (mean2 - mean1) / 2
+        intersection_1d = intersections_1d[0]
+        # convert back to the original space
+        intersection = mean1 + intersection_1d * (mean2 - mean1) / mean2_1d
+        return intersection
 
     def _get_root_node_id(self):
         return self._count_leaves + len(self.clusters) - 1
