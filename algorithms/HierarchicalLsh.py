@@ -1,5 +1,4 @@
 from scipy.cluster.hierarchy import linkage 
-import math
 import numpy as np
 
 
@@ -8,22 +7,28 @@ np.random.seed(RANDOM_STATE)
 
 class HierarchicalLsh:
     
-    def __init__(self, num_levels):
+    def __init__(self, num_levels, maximum_sample_size=1_000):
         self.num_levels = num_levels
+        self._maximum_sample_size = maximum_sample_size
 
     def fit(self, data):
-        MAXIMUM_SAMPLE_SIZE = 1_000
-        data_subset_size = min(data.shape[0], MAXIMUM_SAMPLE_SIZE)
-        print(f"Using {data_subset_size} samples for hierarchical clustering")
-        shuffled_data = np.random.permutation(data)
-        data_subset = shuffled_data[:data_subset_size]
-        self.clustering = HierarchicalClustering(data_subset, method='ward')  # TODO: try other methods of linking
+        leaves = self._select_leaf_data(data, self._maximum_sample_size)
+        self.clustering = HierarchicalClustering(leaves, method='ward')  # TODO: try other methods of linking
 
     def hash_vector(self, vector):
         return self.clustering.calculate_traversal_hash(vector, self.num_levels)
 
     def to_string(self):
         return f"HierarchicalLsh (num_levels={self.num_levels})"
+    
+    def _select_leaf_data(self, data, maximum_sample_size):
+        if maximum_sample_size < data.shape[0]:
+            print(f"Using a random subset of {maximum_sample_size} samples for hierarchical clustering")
+            np.random.seed(RANDOM_STATE)
+            shuffled_data = np.random.permutation(data)
+            return shuffled_data[:maximum_sample_size]
+        print(f"Using full {data.shape[0]} data items as leaves in hierarchical clustering")
+        return data
     
 class HierarchicalClustering:
 

@@ -1,31 +1,35 @@
 from scipy.cluster.hierarchy import linkage 
-import math
 import numpy as np
 
 
 RANDOM_STATE=42
-np.random.seed(RANDOM_STATE)
 
 class HierarchicalHyperplaneLsh:
     '''This LSH algorithm uses a hierarchical clustering to create a tree of hyperplanes.'''
     
-    def __init__(self, num_levels):
+    def __init__(self, num_levels, maximum_sample_size=10_000):
         self.num_levels = num_levels
+        self._maximum_sample_size = maximum_sample_size
 
     def fit(self, data):
-        MAXIMUM_SAMPLE_SIZE = 10_000
-        data_subset_size = min(data.shape[0], MAXIMUM_SAMPLE_SIZE)
-        print(f"Using {data_subset_size} samples for hierarchical clustering")
-        shuffled_data = np.random.permutation(data)
-        data_subset = shuffled_data[:data_subset_size]
-        self.clustering = HierarchicalHyperplaneClustering(data_subset, self.num_levels)
+        leaves = self._select_leaf_data(data, self._maximum_sample_size)
+        self.clustering = HierarchicalHyperplaneClustering(leaves, self.num_levels)
 
     def hash_vector(self, vector):
         return self.clustering.calculate_traversal_hash(vector)
 
     def to_string(self):
         return f"HierarchicalHyperplaneLsh(num_levels={self.num_levels})"
-    
+
+    def _select_leaf_data(self, data, maximum_sample_size):
+        if maximum_sample_size < data.shape[0]:
+            print(f"Using a random subset of {maximum_sample_size} samples for hierarchical clustering")
+            np.random.seed(RANDOM_STATE)
+            shuffled_data = np.random.permutation(data)
+            return shuffled_data[:maximum_sample_size]
+        print(f"Using full {data.shape[0]} data items as leaves in hierarchical clustering")
+        return data
+
 class ClusterValue:
     LEFT = 0
     RIGHT = 1
@@ -39,17 +43,18 @@ class HierarchicalHyperplaneClustering:
     BIT_AS_0 = '0'
     BIT_AS_1 = '1'
 
-    def __init__(self, data, num_levels):
-        self.leaves = data
+    def __init__(self, leaves, num_levels):
+        self.leaves = leaves
+        self._count_leaves = len(leaves)
         # clusters are in z format. Each cluster has 4 values: 2 children indexes, children distance, total leaves
         # the children can be leaves (i.e. data_subset index), or other clusters (i.e. index of cluster + len(data_subset), for uniqueness)
         # clusters' ordering is based on iterations of cluster merging, starting from leave pairs, and ending with the root cluster 
         # therefore the length of z is always n-1, where n is the number of leaves
-        print(f"Building hierarchy over {len(data)} data points")
-        self.clusters = linkage(data, method='ward')
+        print(f"Building hierarchy over {len(leaves)} leaves")
+        self.clusters = linkage(leaves, method='ward')
         self.num_levels = num_levels
         self._enrich_clusters()
-        print('Hierarchical hyperplanes calculated')
+        print(f'{num_levels} hierarchical hyperplanes calculated')
 
     def calculate_traversal_hash(self, vector):
         root_node_id = self._get_root_node_id()
@@ -114,16 +119,16 @@ class HierarchicalHyperplaneClustering:
         return mean, standard_deviation
 
     def _get_root_node_id(self):
-        return len(self.leaves) + len(self.clusters) - 1
+        return self._count_leaves + len(self.clusters) - 1
 
     def _get_cluster(self, node_id):
-        cluster_id = node_id - len(self.leaves)
+        cluster_id = node_id - self._count_leaves
         if cluster_id < 0:
             raise ValueError(f"Node {node_id} is not a cluster")
         return self.clusters[int(cluster_id)]
 
     def _is_leaf(self, node_id):
-        return node_id < len(self.leaves)
+        return node_id < self._count_leaves
     
     def _get_leaf(self, node_id):
         return self.leaves[int(node_id)]
