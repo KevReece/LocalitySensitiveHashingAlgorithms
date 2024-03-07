@@ -83,7 +83,7 @@ class HierarchicalHyperplaneClustering:
 
     def _traverse_down_nodes_for_hash(self, node_id, vector):
         if self._is_leaf(node_id): 
-            raise ValueError(f"Node {node_id} is a leaf")
+            return ''
 
         cluster = self._get_cluster(node_id)
         cluster_hyperplane_centre, cluster_hyperplane_direction = self.cluster_hyperplanes[int(node_id)]
@@ -95,12 +95,8 @@ class HierarchicalHyperplaneClustering:
             return self.BIT_AS_0 if is_left else self.BIT_AS_1
         
         if is_left:
-            if self._is_leaf(cluster[ClusterValue.LEFT]): 
-                return self.BIT_AS_0
             return self.BIT_AS_0 + self._traverse_down_nodes_for_hash(cluster[ClusterValue.LEFT], vector)
         
-        if self._is_leaf(cluster[ClusterValue.RIGHT]):
-            return self.BIT_AS_1
         return self.BIT_AS_1 + self._traverse_down_nodes_for_hash(cluster[ClusterValue.RIGHT], vector)
     
     def _generalized_mean_std(self, mean1, mean2, standard_deviation1, standard_deviation2):
