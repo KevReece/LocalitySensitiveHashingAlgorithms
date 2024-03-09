@@ -7,6 +7,8 @@ RANDOM_STATE=42
 class HierarchicalHyperplaneLsh:
     '''This LSH algorithm uses a hierarchical clustering to create a tree of hyperplanes.'''
     
+    BASE_TWO = 2
+    
     def __init__(self, num_levels, maximum_sample_size=10_000):
         self.num_levels = num_levels
         self._maximum_sample_size = maximum_sample_size
@@ -16,7 +18,8 @@ class HierarchicalHyperplaneLsh:
         self.clustering = HierarchicalHyperplaneClustering(leaves, self.num_levels)
 
     def hash_vector(self, vector):
-        return self.clustering.calculate_traversal_hash(vector)
+        hash_bits = self.clustering.calculate_traversal_hash(vector)
+        return self._hash_bits_to_integer(hash_bits)
 
     def to_string(self):
         return f"HierarchicalHyperplaneLsh(num_levels={self.num_levels})"
@@ -30,6 +33,10 @@ class HierarchicalHyperplaneLsh:
         print(f"Using full {data.shape[0]} data items as leaves in hierarchical clustering")
         return data
 
+    def _hash_bits_to_integer(self, hash_bits):
+        hash_bits_string = ''.join(str(bit) for bit in hash_bits)
+        return int(hash_bits_string, self.BASE_TWO)
+    
 class ClusterValue:
     LEFT = 0
     RIGHT = 1
@@ -40,8 +47,8 @@ class ClusterValue:
 
 class HierarchicalHyperplaneClustering:
 
-    BIT_AS_0 = '0'
-    BIT_AS_1 = '1'
+    BIT_AS_0 = 0
+    BIT_AS_1 = 1
 
     def __init__(self, leaves, num_levels):
         self.leaves = leaves
@@ -84,7 +91,7 @@ class HierarchicalHyperplaneClustering:
 
     def _traverse_down_nodes_for_hash(self, node_id, vector):
         if self._is_leaf(node_id): 
-            return ''
+            return []
 
         cluster = self._get_cluster(node_id)
         cluster_hyperplane_centre, cluster_hyperplane_direction = self.cluster_hyperplanes[int(node_id)]
@@ -93,12 +100,12 @@ class HierarchicalHyperplaneClustering:
         is_penultimate_level = int(cluster[ClusterValue.LEVEL]) == self.num_levels-1
 
         if is_penultimate_level:
-            return self.BIT_AS_0 if is_left else self.BIT_AS_1
+            return [self.BIT_AS_0] if is_left else [self.BIT_AS_1]
         
         if is_left:
-            return self.BIT_AS_0 + self._traverse_down_nodes_for_hash(cluster[ClusterValue.LEFT], vector)
+            return [self.BIT_AS_0] + self._traverse_down_nodes_for_hash(cluster[ClusterValue.LEFT], vector)
         
-        return self.BIT_AS_1 + self._traverse_down_nodes_for_hash(cluster[ClusterValue.RIGHT], vector)
+        return [self.BIT_AS_1] + self._traverse_down_nodes_for_hash(cluster[ClusterValue.RIGHT], vector)
     
     def _merge_means_and_standard_deviations(self, mean1, mean2, standard_deviation1, standard_deviation2, scale1, scale2):
         total_scale = scale1 + scale2
